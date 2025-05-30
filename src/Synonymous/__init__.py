@@ -73,25 +73,33 @@ def add_english_note(selected_notes, deck_id, browser: Browser):
             if field_name not in combined_fields:
                 combined_fields[field_name] = set()
             combined_fields[field_name].add(field_value)
-    count_words = 0;
+    count_words = 0
     for field_name, values in combined_fields.items():
 
         if len(values) > 1:
             values = {val for val in values if val.strip()}
-            if "Image" in field_name:
-                values = {next(iter(values))}
-        new_note[field_name] = ', '.join(sorted(values))
+
+        delimiter = ', '
+        if field_name in ["Extra", "Image", "Audio"]:
+            delimiter = "<br>"
+        new_note[field_name] = delimiter.join(sorted(values))
 
         if "Foreign" in field_name:
-            count_words = len(values);
+            count_words = len(values)
 
     if count_words > 1:
         new_note["Polish/MultiLuka"] += f' [{count_words}]'
+    if len(combined_fields['Dialect']) > 0:
+        for dial in combined_fields['Dialect']:
+            for note_id in selected_notes:
+                note = browser.mw.col.get_note(note_id)
+                if dial in note['Dialect']:
+                    new_note['Extra'] += f'<br>{dial} - {note["Polish/MultiLuka"]}'
 
     browser.mw.col.add_note(new_note, deck_id)
     move_queue_to_top(new_note.id, browser)
 
-def my_custom_function(browser: Browser):
+def combine_english_synonymous(browser: Browser):
     deck_id = ""
     selected_notes = browser.selected_notes()
     if len(selected_notes) < 2:
@@ -107,9 +115,9 @@ def my_custom_function(browser: Browser):
 
 def add_custom_menu(browser: Browser):
     # Create a new action
-    action = QAction("Combine synonymous", browser)
+    action = QAction("Combine english synonymous", browser)
     # Pass the browser to my_custom_function using a lambda
-    action.triggered.connect(lambda: my_custom_function(browser))
+    action.triggered.connect(lambda: combine_english_synonymous(browser))
 
     # Create a new menu
     custom_menu = QMenu("MINE", browser)
