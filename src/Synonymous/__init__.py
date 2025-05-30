@@ -1,8 +1,9 @@
-from aqt import gui_hooks
+from aqt import gui_hooks, mw
 from aqt.qt import QAction, QMenu
-from aqt.utils import showInfo
+from aqt.utils import showInfo, getText
 from aqt.browser import Browser
 import logging
+import re
 logging.basicConfig(level=logging.DEBUG, filename='anki_debug.log', filemode='w')
 
 
@@ -113,15 +114,82 @@ def combine_english_synonymous(browser: Browser):
 
     showInfo(f"Done")
 
-def add_custom_menu(browser: Browser):
-    # Create a new action
-    action = QAction("Combine english synonymous", browser)
-    # Pass the browser to my_custom_function using a lambda
-    action.triggered.connect(lambda: combine_english_synonymous(browser))
+def add_word_to_existing_note(browser, note, word):
+    note["Foreign/Content"] += f", {word}"
 
-    # Create a new menu
+    old_polish_text = note["Polish/MultiLuka"]
+    match = re.search(r'\[(\d+)\]', old_polish_text)
+    if match:
+        number = int(match.group(1))
+        new_number = number + 1
+        old = match.group(0)
+        new = f'[{new_number}]'
+        note["Polish/MultiLuka"] = old_polish_text.replace(old, new, 1)
+    else:
+        note["Polish/MultiLuka"] += " [2]"
+
+    note.flush()
+    mw.col.reset()
+    browser.model.reset()
+
+def add_new_polish_note_for_synomymous(browser, note, word):
+    polish_model = browser.mw.col.models.by_name(READ_POLISH)
+    new_polish_note = browser.mw.col.new_note(polish_model)
+
+    new_polish_note["Foreign/Content"] = word
+    new_polish_note["Polish/MultiLuka"] = re.sub(r'\[\d+\]', '', note["Polish/MultiLuka"])
+    new_polish_note["Image"] = note["Image"]
+    new_polish_note["PartOfSpeech"] = note["PartOfSpeech"]
+    new_polish_note["Extra"] = note["Extra"]
+
+    deck_id = note.cards()[0].did
+    browser.mw.col.add_note(new_polish_note, deck_id)
+    move_queue_to_top(new_polish_note.id, browser)
+
+def add_english_synonym(browser: Browser):
+    selected = browser.selectedNotes()
+    if not selected:
+        showInfo("Please select one note.")
+        return
+    if len(selected) > 1:
+        showInfo("Please select only one note.")
+        return
+
+    nid = selected[0]
+    note = mw.col.get_note(nid)
+
+    word, ok = getText("Enter an English synonym:")
+    if not ok or not word.strip():
+        return
+
+    note_type = note.model()['name']
+    if note_type == DOUBLE:
+        deck_id = add_polish_notes(selected, "", browser)
+        add_new_polish_note_for_synomymous(browser, note, word)
+
+        add_word_to_existing_note(browser, note, word)
+        add_english_note(selected, deck_id, browser)
+
+        delete_notes(selected, browser)
+    else:
+        add_word_to_existing_note(browser, note, word)
+        add_new_polish_note_for_synomymous(browser, note, word)
+
+    showInfo(f"Added synonym {word}")
+
+def add_custom_menu(browser: Browser):
+    # Action 1: Combine
+    action_combine = QAction("Combine english synonymous", browser)
+    action_combine.triggered.connect(lambda: combine_english_synonymous(browser))
+
+    # Action 2: Add single synonym
+    action_add = QAction("Add english synonymous", browser)
+    action_add.triggered.connect(lambda: add_english_synonym(browser))
+
+    # Create menu and add both actions
     custom_menu = QMenu("MINE", browser)
-    custom_menu.addAction(action)
+    custom_menu.addAction(action_combine)
+    custom_menu.addAction(action_add)
 
     # Add the new custom menu to the browser's menu bar
     browser.form.menubar.addMenu(custom_menu)
