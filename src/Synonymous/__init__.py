@@ -4,12 +4,11 @@ from aqt.utils import showInfo, getText
 from aqt.browser import Browser
 import logging
 import re
-logging.basicConfig(level=logging.DEBUG, filename='anki_debug.log', filemode='w')
 
-#Card type
-DOUBLE = "1. Podwójny (wpisywanie odpowiedzi)"
-TYPE_ENGLISH = "2. Pojedynczy (wpisywanie angielski)"
-READ_POLISH = "3. Podstawowy (odczytywanie polski)"
+from src.Synonymous.helper_methods import READ_POLISH, TYPE_ENGLISH, DOUBLE, create_note, create_note_from_existing, \
+    move_queue_to_top, delete_notes
+
+logging.basicConfig(level=logging.DEBUG, filename='anki_debug.log', filemode='w')
 
 #Fields
 FOREIGN_FIELD = "Foreign/Content"
@@ -20,28 +19,6 @@ PART_OF_SPEECH_FIELD = "PartOfSpeech"
 EXTRA_FIELD = "Extra"
 DIALECT_FIELD = "Dialect"
 
-def move_queue_to_top(note_id, browser: Browser):
-    db = browser.mw.col.db
-    top_due = db.first("SELECT MIN(due) FROM cards WHERE queue IN (0)")[0]
-    card_ids = []
-
-    note = browser.mw.col.get_note(note_id)
-    card_ids.extend(note.card_ids())
-
-    for card_id in card_ids:
-        card = browser.mw.col.get_card(card_id)
-        if card:
-            top_due = top_due - 1
-            card.due = top_due
-            browser.mw.col.update_card(card)
-
-def delete_notes(selected_notes, browser: Browser):
-    card_ids = []
-    for note_id in selected_notes:
-        note = browser.mw.col.get_note(note_id)
-        card_ids.extend(note.card_ids())
-
-    browser.mw.col.remove_cards_and_orphaned_notes(card_ids)
 def add_polish_notes(selected_notes, deck_id, browser: Browser):
     polish_model = browser.mw.col.models.by_name(READ_POLISH)
 
@@ -60,7 +37,7 @@ def add_polish_notes(selected_notes, deck_id, browser: Browser):
         if cards:
             deck_id = cards[0].did
             browser.mw.col.add_note(new_polish_note, deck_id)
-            move_queue_to_top(new_polish_note.id, browser)
+            move_queue_to_top(new_polish_note.id)
         else:
             showInfo("Couldn't find deck ID")
 
@@ -106,7 +83,7 @@ def add_english_note(selected_notes, deck_id, browser: Browser):
                     new_note[EXTRA_FIELD] += f'<br>{dial} - {note[POLISH_FIELD]}'
 
     browser.mw.col.add_note(new_note, deck_id)
-    move_queue_to_top(new_note.id, browser)
+    move_queue_to_top(new_note.id)
 
 def combine_english_synonymous(browser: Browser):
     deck_id = ""
@@ -117,7 +94,7 @@ def combine_english_synonymous(browser: Browser):
 
     deck_id = add_polish_notes(selected_notes, deck_id, browser)
     add_english_note(selected_notes, deck_id, browser)
-    delete_notes(selected_notes, browser)
+    delete_notes(selected_notes)
     browser.model.reset()
 
     showInfo(f"Done")
@@ -152,7 +129,7 @@ def add_new_polish_note_for_synomymous(browser, note, word):
 
     deck_id = note.cards()[0].did
     browser.mw.col.add_note(new_polish_note, deck_id)
-    move_queue_to_top(new_polish_note.id, browser)
+    move_queue_to_top(new_polish_note.id)
 
 def add_english_synonym(browser: Browser):
     selected = browser.selectedNotes()
@@ -178,7 +155,7 @@ def add_english_synonym(browser: Browser):
         add_word_to_existing_note(browser, note, word)
         add_english_note(selected, deck_id, browser)
 
-        delete_notes(selected, browser)
+        delete_notes(selected)
     else:
         add_word_to_existing_note(browser, note, word)
         add_new_polish_note_for_synomymous(browser, note, word)
@@ -194,39 +171,27 @@ def split_polish_synonymous(browser: Browser):
         showInfo("Please select only one note.")
         return
 
-    nid = selected[0]
-    note = mw.col.get_note(nid)
+    selected_note = mw.col.get_note(selected[0])
+    deck_id_selected_note = selected_note.cards()[0].did
 
-    splitted_note = note[POLISH_FIELD].split(';')
-    if len(splitted_note) <= 1:
+    polish_words = selected_note[POLISH_FIELD].split(';')
+    if len(polish_words) <= 1:
         showInfo("Nothing to split.")
         return
 
-    card_english_type = browser.mw.col.models.by_name(TYPE_ENGLISH)
-    card_polish_read = browser.mw.col.models.by_name(READ_POLISH)
+    new_polish_note = create_note_from_existing(READ_POLISH, selected_note)
+    new_polish_note[FOREIGN_FIELD] += f' [{len(polish_words)}]'
 
-    new_polish_note = browser.mw.col.new_note(card_polish_read)
-    for field in note.keys():
-        new_polish_note[field] = note[field]
-    new_polish_note[FOREIGN_FIELD] += f'[{len(splitted_note)}]'
-
-    deck_id = note.cards()[0].did
-    browser.mw.col.add_note(new_polish_note, deck_id)
-    move_queue_to_top(new_polish_note.id, browser)
-
-    for polish_word in splitted_note:
-        new_english_note = browser.mw.col.new_note(card_english_type)
-
-        for field in note.keys():
-            new_english_note[field] = note[field]
+    for polish_word in polish_words:
+        new_english_note = create_note_from_existing(TYPE_ENGLISH, selected_note)
         new_english_note[POLISH_FIELD] = polish_word
 
-        browser.mw.col.add_note(new_english_note, deck_id)
-        move_queue_to_top(new_english_note.id, browser)
+        browser.mw.col.add_note(new_english_note, deck_id_selected_note)
+        move_queue_to_top(new_english_note.id)
 
-    delete_notes(selected, browser)
+    delete_notes(selected)
     browser.model.reset()
-    showInfo(f"Splitted {', '.join(splitted_note)}")
+    showInfo(f"Splitted {', '.join(polish_words)}")
 
 def add_custom_menu(browser: Browser):
     # Action 1
