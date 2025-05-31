@@ -6,7 +6,7 @@ import logging
 import re
 
 from src.Synonymous.helper_methods import READ_POLISH, TYPE_ENGLISH, DOUBLE, create_note, create_note_from_existing, \
-    move_queue_to_top, delete_notes
+    move_queue_to_top, delete_notes, has_card_type, add_note_and_move_queue_up
 
 logging.basicConfig(level=logging.DEBUG, filename='anki_debug.log', filemode='w')
 
@@ -19,84 +19,50 @@ PART_OF_SPEECH_FIELD = "PartOfSpeech"
 EXTRA_FIELD = "Extra"
 DIALECT_FIELD = "Dialect"
 
-def add_polish_notes(selected_notes, deck_id, browser: Browser):
-    polish_model = browser.mw.col.models.by_name(READ_POLISH)
-
-    for note in selected_notes:
-
-        original_note = browser.mw.col.get_note(note)
-        note_type = original_note.model()['name']
-        if note_type == TYPE_ENGLISH:
-            continue
-
-        new_polish_note = browser.mw.col.new_note(polish_model)
-        for field_name in original_note.keys():
-            new_polish_note[field_name] = original_note[field_name]
-
-        cards = original_note.cards()
-        if cards:
-            deck_id = cards[0].did
-            browser.mw.col.add_note(new_polish_note, deck_id)
-            move_queue_to_top(new_polish_note.id)
-        else:
-            showInfo("Couldn't find deck ID")
-
-    return deck_id
-
-def add_english_note(selected_notes, deck_id, browser: Browser):
-    english_model = browser.mw.col.models.by_name(TYPE_ENGLISH)
-    new_note = browser.mw.col.new_note(english_model)
-    combined_fields = {}
-
-    for note_id in selected_notes:
-        note = browser.mw.col.get_note(note_id)
-        note_type = note.model()['name']
-        if note_type == TYPE_ENGLISH:
-            continue
-
-        for field_name in note.keys():
-            field_value = note[field_name]
-            if field_name not in combined_fields:
-                combined_fields[field_name] = set()
-            combined_fields[field_name].add(field_value)
-    count_words = 0
-    for field_name, values in combined_fields.items():
-
-        if len(values) > 1:
-            values = {val for val in values if val.strip()}
-
-        delimiter = ', '
-        if field_name in [EXTRA_FIELD, IMAGE_FIELD, AUDIO_FIELD]:
-            delimiter = "<br>"
-        new_note[field_name] = delimiter.join(sorted(values))
-
-        if "Foreign" in field_name:
-            count_words = len(values)
-
-    if count_words > 1:
-        new_note[POLISH_FIELD] += f' [{count_words}]'
-    if len(combined_fields[DIALECT_FIELD]) > 0:
-        for dial in combined_fields[DIALECT_FIELD]:
-            for note_id in selected_notes:
-                note = browser.mw.col.get_note(note_id)
-                if dial in note[DIALECT_FIELD]:
-                    new_note[EXTRA_FIELD] += f'<br>{dial} - {note[POLISH_FIELD]}'
-
-    browser.mw.col.add_note(new_note, deck_id)
-    move_queue_to_top(new_note.id)
-
 def combine_english_synonymous(browser: Browser):
-    deck_id = ""
-    selected_notes = browser.selected_notes()
+    selected_notes = browser.selectedNotes()
     if len(selected_notes) < 2:
         showInfo("Please select at least two notes.")
         return
 
-    deck_id = add_polish_notes(selected_notes, deck_id, browser)
-    add_english_note(selected_notes, deck_id, browser)
+    deck_id = mw.col.get_note(selected_notes[0]).cards()[0].did
+    new_english_note = create_note(TYPE_ENGLISH)
+
+    for note_id in selected_notes:
+        original_note = mw.col.get_note(note_id)
+
+        if has_card_type(original_note, TYPE_ENGLISH):
+            continue
+
+        # Add polish note
+        new_polish_note = create_note_from_existing(READ_POLISH, original_note)
+        add_note_and_move_queue_up(new_polish_note, deck_id)
+
+        # Start creating combined english note
+        for field_name in original_note.keys():
+            if not original_note[field_name].strip():
+                continue
+
+            delimiter = ""
+            if new_english_note[field_name].strip():
+                delimiter = ', '
+                if field_name in [EXTRA_FIELD, IMAGE_FIELD, AUDIO_FIELD]:
+                    delimiter = "<br>"
+
+            new_english_note[field_name] += delimiter + original_note[field_name]
+            if DIALECT_FIELD in field_name:
+                new_english_note[EXTRA_FIELD] += f'<br>{original_note[DIALECT_FIELD]} - {original_note[POLISH_FIELD]}'
+
+    count_english_words = len(new_english_note[FOREIGN_FIELD].split(','))
+    if count_english_words > 1:
+        new_english_note[POLISH_FIELD] += f' [{count_english_words}]'
+
+    #Add combined english note
+    add_note_and_move_queue_up(new_english_note, deck_id)
+
+    #Delete selected notes
     delete_notes(selected_notes)
     browser.model.reset()
-
     showInfo(f"Done")
 
 def add_word_to_existing_note(browser, note, word):
@@ -140,8 +106,7 @@ def add_english_synonym(browser: Browser):
         showInfo("Please select only one note.")
         return
 
-    nid = selected[0]
-    note = mw.col.get_note(nid)
+    note = mw.col.get_note(selected[0])
 
     word, ok = getText("Enter an English synonym:")
     if not ok or not word.strip():
@@ -172,23 +137,25 @@ def split_polish_synonymous(browser: Browser):
         return
 
     selected_note = mw.col.get_note(selected[0])
-    deck_id_selected_note = selected_note.cards()[0].did
+    deck_id = selected_note.cards()[0].did
 
     polish_words = selected_note[POLISH_FIELD].split(';')
     if len(polish_words) <= 1:
         showInfo("Nothing to split.")
         return
 
+    #Create polish combined note
     new_polish_note = create_note_from_existing(READ_POLISH, selected_note)
     new_polish_note[FOREIGN_FIELD] += f' [{len(polish_words)}]'
+    add_note_and_move_queue_up(new_polish_note, deck_id)
 
+    #Create english notes
     for polish_word in polish_words:
         new_english_note = create_note_from_existing(TYPE_ENGLISH, selected_note)
         new_english_note[POLISH_FIELD] = polish_word
+        add_note_and_move_queue_up(new_english_note, deck_id)
 
-        browser.mw.col.add_note(new_english_note, deck_id_selected_note)
-        move_queue_to_top(new_english_note.id)
-
+    #Delete selected notes
     delete_notes(selected)
     browser.model.reset()
     showInfo(f"Splitted {', '.join(polish_words)}")
