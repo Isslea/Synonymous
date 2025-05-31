@@ -63,19 +63,24 @@ def combine_english_synonymous(browser: Browser):
 
 def add_english_synonym(browser: Browser):
     selected = browser.selectedNotes()
-    if not selected:
-        showInfo("Please select one note.")
-        return
-    if len(selected) > 1:
-        showInfo("Please select only one note.")
+    word = ''
+    if not selected or len(selected) >= 3:
+        showInfo("Please select one for manual or two notes for automatic.")
         return
 
     note = mw.col.get_note(selected[0])
     deck_id = note.cards()[0].did
 
-    word, ok = getText("Enter an English synonym:")
-    if not ok or not word.strip():
-        return
+    if len(selected) == 1:
+        word, ok = getText("Enter an English synonym:")
+        if not ok or not word.strip():
+            return
+    else:
+        if not has_card_type(note, TYPE_ENGLISH):
+            word = note[FOREIGN_FIELD]
+            note = mw.col.get_note(selected[1])
+        else:
+            word = note[FOREIGN_FIELD]
 
     #Add polish note if card is of type double
     if has_card_type(note, DOUBLE):
