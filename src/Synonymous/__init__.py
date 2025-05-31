@@ -15,28 +15,51 @@ PART_OF_SPEECH_FIELD = "PartOfSpeech"
 EXTRA_FIELD = "Extra"
 DIALECT_FIELD = "Dialect"
 
-def combine_english_synonymous(browser: Browser):
-    selected_notes = browser.selectedNotes()
-    if len(selected_notes) < 2:
-        showInfo("Please select at least two notes.")
+def add_english_synonym(browser: Browser):
+    selected = browser.selectedNotes()
+    if not selected:
+        showInfo("Please select one (manual mode) or more (combine mode) notes")
         return
 
-    deck_id = mw.col.get_note(selected_notes[0]).cards()[0].did
-    new_english_note = create_note(TYPE_ENGLISH)
+    note_list = []
+    note = mw.col.get_note(selected[0])
+    deck_id = note.cards()[0].did
 
-    for note_id in selected_notes:
-        original_note = mw.col.get_note(note_id)
+    if len(selected) == 1:
+        word, ok = getText("Enter an English synonym:")
+        if not ok or not word.strip():
+            return
+        #Fake notes when manual mode
+        note[POLISH_FIELD] = re.sub(r'\s*\[\d+\]', '', note[POLISH_FIELD])
+        if not has_card_type(note, TYPE_ENGLISH):
+            note_list.append(note)
+        new_note = create_note_from_existing(DOUBLE, note)
+        new_note[AUDIO_FIELD] = ""
+        new_note[DIALECT_FIELD] = ""
+        new_note[FOREIGN_FIELD] = word
+        note_list.append(new_note)
+    else:
+        for i, value in enumerate(selected):
+            curr_note = mw.col.get_note(selected[i])
+            if not has_card_type(curr_note, TYPE_ENGLISH):
+                note_list.append(curr_note)
+            else:
+                note = curr_note
 
-        if has_card_type(original_note, TYPE_ENGLISH):
-            continue
+    if has_card_type(note, TYPE_ENGLISH):
+        new_english_note = create_note_from_existing(TYPE_ENGLISH, note)
+        new_english_note[POLISH_FIELD] = re.sub(r'\s*\[\d+\]', '', new_english_note[POLISH_FIELD])
+    else:
+        new_english_note = create_note(TYPE_ENGLISH)
 
-        # Add polish note
-        new_polish_note = create_note_from_existing(READ_POLISH, original_note)
+    for note in note_list:
+        # Add new polish note
+        new_polish_note = create_note_from_existing(READ_POLISH, note)
         add_note_and_move_queue_up(new_polish_note, deck_id)
 
-        # Start creating combined english note
-        for field_name in original_note.keys():
-            if not original_note[field_name].strip():
+    #Fill english note
+        for field_name in note.keys():
+            if not note[field_name].strip():
                 continue
 
             delimiter = ""
@@ -45,76 +68,31 @@ def combine_english_synonymous(browser: Browser):
                 if field_name in [EXTRA_FIELD, IMAGE_FIELD, AUDIO_FIELD]:
                     delimiter = "<br>"
 
-            new_english_note[field_name] += delimiter + original_note[field_name]
+            #Avoid duplicates
+            if delimiter:
+                if note[field_name] in new_english_note[field_name] or note[field_name] in new_english_note[field_name].split(delimiter):
+                    continue
+
+            new_english_note[field_name] += delimiter + note[field_name]
+
+            #Connect dialects with meanings
             if DIALECT_FIELD in field_name:
-                new_english_note[EXTRA_FIELD] += f'<br>{original_note[DIALECT_FIELD]} - {original_note[POLISH_FIELD]}'
+                dialect_info = "";
+                if new_english_note[EXTRA_FIELD]:
+                    dialect_info = "<br>"
+                dialect_info += f"{note[DIALECT_FIELD]} - {note[POLISH_FIELD]}"
+                new_english_note[EXTRA_FIELD] += dialect_info
 
-    count_english_words = len(new_english_note[FOREIGN_FIELD].split(','))
-    if count_english_words > 1:
-        new_english_note[POLISH_FIELD] += f' [{count_english_words}]'
+    #Add polish count
+    new_english_note[POLISH_FIELD] += f" [{len(new_english_note[FOREIGN_FIELD].split(','))}]"
 
-    #Add combined english note
+    #Add completed english note
     add_note_and_move_queue_up(new_english_note, deck_id)
-
-    #Delete selected notes
-    delete_notes(selected_notes)
-    browser.model.reset()
-    showInfo(f"Done")
-
-def add_english_synonym(browser: Browser):
-    selected = browser.selectedNotes()
-    word = ''
-    if not selected or len(selected) >= 3:
-        showInfo("Please select one for manual or two notes for automatic.")
-        return
-
-    note = mw.col.get_note(selected[0])
-    deck_id = note.cards()[0].did
-
-    if len(selected) == 1:
-        word, ok = getText("Enter an English synonym:")
-        if not ok or not word.strip():
-            return
-    else:
-        if not has_card_type(note, TYPE_ENGLISH):
-            word = note[FOREIGN_FIELD]
-            note = mw.col.get_note(selected[1])
-        else:
-            word = note[FOREIGN_FIELD]
-
-    #Add polish note if card is of type double
-    if has_card_type(note, DOUBLE):
-        temp_english_note = create_note_from_existing(READ_POLISH, note)
-        add_note_and_move_queue_up(temp_english_note, deck_id)
-
-    #Add combined english note
-    new_english_note = create_note_from_existing(TYPE_ENGLISH, note)
-    new_english_note[FOREIGN_FIELD] += f", {word}"
-
-    old_polish_text = new_english_note[POLISH_FIELD]
-    match = re.search(r'\[(\d+)\]', old_polish_text)
-    if match:
-        number = int(match.group(1))
-        new_number = number + 1
-        old = match.group(0)
-        new = f'[{new_number}]'
-        new_english_note[POLISH_FIELD] = old_polish_text.replace(old, new, 1)
-    else:
-        new_english_note[POLISH_FIELD] += " [2]"
-
-    add_note_and_move_queue_up(new_english_note, deck_id)
-
-    #Add new polish note
-    new_polish_note = create_note_from_existing(READ_POLISH, note)
-    new_polish_note[FOREIGN_FIELD] = word
-    new_polish_note[POLISH_FIELD] = re.sub(r'\[\d+\]', '', note[POLISH_FIELD])
-    new_polish_note[AUDIO_FIELD] = ""
-    add_note_and_move_queue_up(new_polish_note, deck_id)
 
     #Delete selected note
     delete_notes(selected)
     browser.model.reset()
-    showInfo(f"Added synonym {word}")
+    showInfo(f"Added synonym")
 
 def split_polish_synonymous(browser: Browser):
     selected = browser.selectedNotes()
@@ -151,20 +129,15 @@ def split_polish_synonymous(browser: Browser):
 
 def add_custom_menu(browser: Browser):
     # Action 1
-    action_combine = QAction("Combine english synonymous", browser)
-    action_combine.triggered.connect(lambda: combine_english_synonymous(browser))
-
-    # Action 2
     action_add = QAction("Add english synonymous", browser)
     action_add.triggered.connect(lambda: add_english_synonym(browser))
 
-    # Action 3
+    # Action 2
     action_split = QAction("Split polish synonymous", browser)
     action_split.triggered.connect(lambda: split_polish_synonymous(browser))
 
     # Create menu and add both actions
     custom_menu = QMenu("MINE", browser)
-    custom_menu.addAction(action_combine)
     custom_menu.addAction(action_add)
     custom_menu.addAction(action_split)
 
