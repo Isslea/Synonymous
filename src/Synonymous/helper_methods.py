@@ -19,6 +19,7 @@ def create_note_from_existing(card_type: str, note):
 
     return new_note
 
+#Check card type
 def has_card_type(note, card_type: str):
     note_type = note.model()['name']
     return note_type == card_type

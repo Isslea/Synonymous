@@ -2,13 +2,9 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction, QMenu
 from aqt.utils import showInfo, getText
 from aqt.browser import Browser
-import logging
 import re
 
-from src.Synonymous.helper_methods import READ_POLISH, TYPE_ENGLISH, DOUBLE, create_note, create_note_from_existing, \
-    move_queue_to_top, delete_notes, has_card_type, add_note_and_move_queue_up
-
-logging.basicConfig(level=logging.DEBUG, filename='anki_debug.log', filemode='w')
+from .helper_methods import READ_POLISH, TYPE_ENGLISH, DOUBLE, create_note, create_note_from_existing, move_queue_to_top, delete_notes, has_card_type, add_note_and_move_queue_up
 
 #Fields
 FOREIGN_FIELD = "Foreign/Content"
@@ -65,38 +61,6 @@ def combine_english_synonymous(browser: Browser):
     browser.model.reset()
     showInfo(f"Done")
 
-def add_word_to_existing_note(browser, note, word):
-    note[FOREIGN_FIELD] += f", {word}"
-
-    old_polish_text = note[POLISH_FIELD]
-    match = re.search(r'\[(\d+)\]', old_polish_text)
-    if match:
-        number = int(match.group(1))
-        new_number = number + 1
-        old = match.group(0)
-        new = f'[{new_number}]'
-        note[POLISH_FIELD] = old_polish_text.replace(old, new, 1)
-    else:
-        note[POLISH_FIELD] += " [2]"
-
-    note.flush()
-    mw.col.reset()
-    browser.model.reset()
-
-def add_new_polish_note_for_synomymous(browser, note, word):
-    polish_model = browser.mw.col.models.by_name(READ_POLISH)
-    new_polish_note = browser.mw.col.new_note(polish_model)
-
-    new_polish_note[FOREIGN_FIELD] = word
-    new_polish_note[POLISH_FIELD] = re.sub(r'\[\d+\]', '', note[POLISH_FIELD])
-    new_polish_note[IMAGE_FIELD] = note[IMAGE_FIELD]
-    new_polish_note[PART_OF_SPEECH_FIELD] = note[PART_OF_SPEECH_FIELD]
-    new_polish_note[EXTRA_FIELD] = note[EXTRA_FIELD]
-
-    deck_id = note.cards()[0].did
-    browser.mw.col.add_note(new_polish_note, deck_id)
-    move_queue_to_top(new_polish_note.id)
-
 def add_english_synonym(browser: Browser):
     selected = browser.selectedNotes()
     if not selected:
@@ -107,24 +71,44 @@ def add_english_synonym(browser: Browser):
         return
 
     note = mw.col.get_note(selected[0])
+    deck_id = note.cards()[0].did
 
     word, ok = getText("Enter an English synonym:")
     if not ok or not word.strip():
         return
 
-    note_type = note.model()['name']
-    if note_type == DOUBLE:
-        deck_id = add_polish_notes(selected, "", browser)
-        add_new_polish_note_for_synomymous(browser, note, word)
+    #Add polish note if card is of type double
+    if has_card_type(note, DOUBLE):
+        temp_english_note = create_note_from_existing(READ_POLISH, note)
+        add_note_and_move_queue_up(temp_english_note, deck_id)
 
-        add_word_to_existing_note(browser, note, word)
-        add_english_note(selected, deck_id, browser)
+    #Add combined english note
+    new_english_note = create_note_from_existing(TYPE_ENGLISH, note)
+    new_english_note[FOREIGN_FIELD] += f", {word}"
 
-        delete_notes(selected)
+    old_polish_text = new_english_note[POLISH_FIELD]
+    match = re.search(r'\[(\d+)\]', old_polish_text)
+    if match:
+        number = int(match.group(1))
+        new_number = number + 1
+        old = match.group(0)
+        new = f'[{new_number}]'
+        new_english_note[POLISH_FIELD] = old_polish_text.replace(old, new, 1)
     else:
-        add_word_to_existing_note(browser, note, word)
-        add_new_polish_note_for_synomymous(browser, note, word)
+        new_english_note[POLISH_FIELD] += " [2]"
 
+    add_note_and_move_queue_up(new_english_note, deck_id)
+
+    #Add new polish note
+    new_polish_note = create_note_from_existing(READ_POLISH, note)
+    new_polish_note[FOREIGN_FIELD] = word
+    new_polish_note[POLISH_FIELD] = re.sub(r'\[\d+\]', '', note[POLISH_FIELD])
+    new_polish_note[AUDIO_FIELD] = ""
+    add_note_and_move_queue_up(new_polish_note, deck_id)
+
+    #Delete selected note
+    delete_notes(selected)
+    browser.model.reset()
     showInfo(f"Added synonym {word}")
 
 def split_polish_synonymous(browser: Browser):
