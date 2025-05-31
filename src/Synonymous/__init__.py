@@ -106,7 +106,7 @@ def split_polish_synonymous(browser: Browser):
     selected_note = mw.col.get_note(selected[0])
     deck_id = selected_note.cards()[0].did
 
-    polish_words = selected_note[POLISH_FIELD].split(';')
+    polish_words = re.sub(r"&nbsp;", " ",selected_note[POLISH_FIELD]).split(';')
     if len(polish_words) <= 1:
         showInfo("Nothing to split.")
         return
