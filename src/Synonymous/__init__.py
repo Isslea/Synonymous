@@ -129,7 +129,7 @@ def split_polish_synonymous(browser: Browser):
 
 def add_custom_menu(browser: Browser):
     # Action 1
-    action_add = QAction("Add english synonymous", browser)
+    action_add = QAction("Add synonymous", browser)
     action_add.triggered.connect(lambda: add_english_synonym(browser))
 
     # Action 2
