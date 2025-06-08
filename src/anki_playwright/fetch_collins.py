@@ -81,18 +81,18 @@ if __name__ == "__main__":
     word = sys.argv[1]
 
     #Fetch from collins pronunciation tab
-    ipa, sound = fetch_pron_in_pron_tab(word)
+    ipa, sound = fetch_pron_camb(word)
 
     # If not found, try fetching from collins definition tab
     if not ipa or not sound:
-        temp_ipa, temp_sound = fetch_pron_in_def_tab(word)
+        temp_ipa, temp_sound = fetch_pron_in_pron_tab(word)
         if temp_ipa:
             ipa = temp_ipa
         if temp_sound:
             sound = temp_sound
         # If still not found, try fetching from Cambridge
         if not temp_ipa or not temp_sound:
-            temp_ipa, temp_sound = fetch_pron_camb(word)
+            temp_ipa, temp_sound = fetch_pron_in_def_tab(word)
             if temp_ipa:
                 ipa = temp_ipa
             if temp_sound:
