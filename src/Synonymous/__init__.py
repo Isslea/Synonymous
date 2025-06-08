@@ -200,6 +200,7 @@ def add_pronunciation(browser: Browser):
             if not ipa and not audio_url and "-" in word:
                words.extend(word.split("-"))
                continue
+
             if ipa:
                 ipa_list.append(f"/{ipa}/")
                 pron_dict[word]['ipa'] = f"/{ipa}/"
