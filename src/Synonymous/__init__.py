@@ -197,7 +197,7 @@ def add_pronunciation(browser: Browser):
             #Fetch pronunciation and IPA
             ipa, audio_url = fetch_pronunciation(word)
 
-            if not ipa and not audio_url and "-" in word:
+            if (not ipa or not audio_url) and "-" in word:
                words.extend(word.split("-"))
                continue
 
