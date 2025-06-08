@@ -3,8 +3,12 @@ from aqt.qt import QAction, QMenu
 from aqt.utils import showInfo, getText
 from aqt.browser import Browser
 import re
+import os
+import requests
 
-from .helper_methods import READ_POLISH, TYPE_ENGLISH, DOUBLE, create_note, create_note_from_existing, move_queue_to_top, delete_notes, has_card_type, add_note_and_move_queue_up
+from .collins_dict import fetch_pronunciation
+from .helper_methods import READ_POLISH, TYPE_ENGLISH, DOUBLE, create_note, create_note_from_existing, \
+    move_queue_to_top, delete_notes, has_card_type, add_note_and_move_queue_up, read_json_file, write_json_file
 
 #Fields
 FOREIGN_FIELD = "Foreign/Content"
@@ -14,6 +18,7 @@ IMAGE_FIELD = "Image"
 PART_OF_SPEECH_FIELD = "PartOfSpeech"
 EXTRA_FIELD = "Extra"
 DIALECT_FIELD = "Dialect"
+IPA_FIELD = "IPA"
 
 def add_english_synonym(browser: Browser):
     selected = browser.selectedNotes()
@@ -77,7 +82,7 @@ def add_english_synonym(browser: Browser):
 
             #Connect dialects with meanings
             if DIALECT_FIELD in field_name:
-                dialect_info = "";
+                dialect_info = ""
                 if new_english_note[EXTRA_FIELD]:
                     dialect_info = "<br>"
                 dialect_info += f"{note[DIALECT_FIELD]} - {note[POLISH_FIELD]}"
@@ -127,6 +132,71 @@ def split_polish_synonymous(browser: Browser):
     browser.model.reset()
     showInfo(f"Splitted {', '.join(polish_words)}")
 
+def add_pronunciation(browser: Browser):
+    selected = browser.selectedNotes()
+    if not selected:
+        showInfo("Please select at least one note.")
+        return
+
+    filepath, pron_dict = read_json_file("pron_and_ipa_list")
+
+    for note_id in selected:
+        note = mw.col.get_note(note_id)
+        ipa_list = []
+        audio_list = []
+
+        words = re.split(r'[, ]+', note[FOREIGN_FIELD].strip())
+        for word in words:
+            if not word.strip():
+                continue
+
+            #Check if word is already in the dictionary
+            if word in pron_dict:
+                temp_ipa = pron_dict[word].get('ipa', None)
+                temp_sound = pron_dict[word].get('sound', None)
+                if temp_ipa and temp_sound:
+                    ipa_list.append(temp_ipa)
+                    audio_list.append(temp_sound)
+                    continue
+            else:
+                pron_dict[word] = {}
+
+            #Fetch pronunciation and IPA
+            ipa, audio_url = fetch_pronunciation(word)
+
+            if ipa and not pron_dict[word].get('ipa'):
+                ipa_list.append(f"/{ipa}/")
+                pron_dict[word]['ipa'] = ipa
+
+            if audio_url and not pron_dict[word].get('sound'):
+                # Download the audio file
+                filename = f"{word}.mp3"
+                filetag = f"[sound:{filename}]"
+                downloads_dir = os.path.join(os.path.expanduser("~"), "Library/Application Support/Anki2/temp/collection.media")
+                file_path = os.path.join(downloads_dir, filename)
+
+                headers = {
+                    "User-Agent": "Mozilla/5.0"
+                }
+                response = requests.get(audio_url, headers=headers)
+
+                if response.status_code == 200:
+                    audio_list.append(filetag)
+                    pron_dict[word]['sound'] = filetag
+                    with open(file_path, "wb") as f:
+                        f.write(response.content)
+
+        # Add IPA and audio to the note
+        if len(ipa_list) > 0:
+            note[IPA_FIELD] = " ".join(ipa_list) if ipa_list else ""
+        if len(audio_list) > 0:
+            note[AUDIO_FIELD] = "<br>".join(audio_list) if audio_list else ""
+        note.flush()
+
+    write_json_file(filepath, pron_dict)
+    browser.model.reset()
+    showInfo(f"Added pronunciation")
+
 def add_custom_menu(browser: Browser):
     # Action 1
     action_add = QAction("Add synonymous", browser)
@@ -136,10 +206,14 @@ def add_custom_menu(browser: Browser):
     action_split = QAction("Split polish synonymous", browser)
     action_split.triggered.connect(lambda: split_polish_synonymous(browser))
 
+    action_pron = QAction("Add pronunciation", browser)
+    action_pron.triggered.connect(lambda: add_pronunciation(browser))
+
     # Create menu and add both actions
     custom_menu = QMenu("MINE", browser)
     custom_menu.addAction(action_add)
     custom_menu.addAction(action_split)
+    custom_menu.addAction(action_pron)
 
     # Add the new custom menu to the browser's menu bar
     browser.form.menubar.addMenu(custom_menu)

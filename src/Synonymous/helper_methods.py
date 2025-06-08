@@ -1,3 +1,6 @@
+import json
+import os
+
 from aqt import mw
 
 #Card types
@@ -53,3 +56,25 @@ def delete_notes(selected_notes):
         card_ids.extend(note.card_ids())
 
     mw.col.remove_cards_and_orphaned_notes(card_ids)
+
+#Json helpers
+def read_json_file(filename: str):
+    profile_folder = mw.pm.profileFolder()
+    json_path = os.path.join(profile_folder, f"{filename}.json")
+
+    # Create if does not exists
+    if not os.path.exists(json_path):
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump({}, f, ensure_ascii=False, indent=4)
+
+    # Read if is not empty
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            pron_dict = json.load(f)
+    except json.JSONDecodeError:
+        pron_dict = {}
+    return json_path, pron_dict
+
+def write_json_file(filepath: str, data: dict):
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
