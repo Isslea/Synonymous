@@ -2,6 +2,9 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction, QMenu
 from aqt.utils import showInfo, getText
 from aqt.browser import Browser
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QProgressBar, QPushButton
+from PyQt6.QtCore import Qt
+from aqt.qt import QApplication
 import re
 import os
 import requests
@@ -19,6 +22,23 @@ PART_OF_SPEECH_FIELD = "PartOfSpeech"
 EXTRA_FIELD = "Extra"
 DIALECT_FIELD = "Dialect"
 IPA_FIELD = "IPA"
+
+class ProgressDialog(QDialog):
+    def __init__(self, maximum, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Adding pronunciation...")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.canceled = False
+        layout = QVBoxLayout(self)
+        self.progress = QProgressBar(self)
+        self.progress.setMaximum(maximum)
+        layout.addWidget(self.progress)
+        self.cancel_btn = QPushButton("Anuluj", self)
+        self.cancel_btn.clicked.connect(self.cancel)
+        layout.addWidget(self.cancel_btn)
+
+    def cancel(self):
+        self.canceled = True
 
 def add_english_synonym(browser: Browser):
     selected = browser.selectedNotes()
@@ -140,7 +160,15 @@ def add_pronunciation(browser: Browser):
 
     filepath, pron_dict = read_json_file("pron_and_ipa_list")
 
-    for note_id in selected:
+    #Open progress and cancel window
+    progress_dialog = ProgressDialog(len(selected), mw)
+    progress_dialog.show()
+    QApplication.processEvents()
+    for idx, note_id in enumerate(selected):
+        #Cancel
+        if progress_dialog.canceled:
+            break
+
         note = mw.col.get_note(note_id)
         ipa_list = []
         audio_list = []
@@ -203,7 +231,11 @@ def add_pronunciation(browser: Browser):
         if len(audio_list) > 0:
             note[AUDIO_FIELD] = "<br>".join(audio_list) if audio_list else ""
         note.flush()
+        # Go to next word in queue
+        progress_dialog.progress.setValue(idx + 1)
+        QApplication.processEvents()
 
+    progress_dialog.close()
     write_json_file(filepath, pron_dict)
     browser.model.reset()
     showInfo(f"Added pronunciation")
