@@ -145,7 +145,12 @@ def add_pronunciation(browser: Browser):
         ipa_list = []
         audio_list = []
 
-        words = re.split(r'[, ]+', note[FOREIGN_FIELD].strip())
+        note_field = note[FOREIGN_FIELD]
+        note_field = re.sub(r'^to\s', '', note_field)
+        note_field = re.sub(r'\[\d+\]', '', note_field)
+        note_field = re.sub(r'\'s\b', '', note_field)
+        note_field = note_field.replace("&nbsp;", " ")
+        words = re.split(r'[, ]+', note_field.strip())
         for word in words:
             if not word.strip():
                 continue
@@ -164,11 +169,14 @@ def add_pronunciation(browser: Browser):
             #Fetch pronunciation and IPA
             ipa, audio_url = fetch_pronunciation(word)
 
-            if ipa and not pron_dict[word].get('ipa'):
+            if ipa:
                 ipa_list.append(f"/{ipa}/")
-                pron_dict[word]['ipa'] = ipa
+                pron_dict[word]['ipa'] = f"/{ipa}/"
+            else:
+                ipa_list.append("/-/")
+                pron_dict[word]['ipa'] = "/-/"
 
-            if audio_url and not pron_dict[word].get('sound'):
+            if audio_url:
                 # Download the audio file
                 filename = f"{word}.mp3"
                 filetag = f"[sound:{filename}]"
@@ -185,6 +193,9 @@ def add_pronunciation(browser: Browser):
                     pron_dict[word]['sound'] = filetag
                     with open(file_path, "wb") as f:
                         f.write(response.content)
+            else:
+                audio_list.append("[sound:error.mp3]")
+                pron_dict[word]['sound'] = "[sound:error.mp3]"
 
         # Add IPA and audio to the note
         if len(ipa_list) > 0:
