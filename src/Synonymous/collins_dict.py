@@ -4,7 +4,10 @@ import subprocess
 import json
 
 def fetch_pronunciation(word: str):
-    script_path = os.path.expanduser("/Users/klaudiarapacz/Documents/Python/Synonymous/src/anki_playwright/fetch_collins.py")
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    collins_path = os.path.join(current_dir, 'anki_playwright', 'fetch_collins.py')
+
+    script_path = os.path.expanduser(collins_path)
     result = subprocess.run([
         "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
         script_path,
