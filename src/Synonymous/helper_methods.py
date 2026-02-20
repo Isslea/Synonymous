@@ -1,6 +1,8 @@
 import json
 import os
+import time
 
+import requests
 from aqt import mw
 
 #Card types
@@ -78,3 +80,64 @@ def read_json_file(filename: str):
 def write_json_file(filepath: str, data: dict):
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+def call_gemini_api_async(text: str) -> str | None:
+    api_key = "AIzaSyDpQ5fpf1S6G9hJ8wy7CPJrqPyOb8sOPfc"
+    url = (
+        f"https://generativelanguage.googleapis.com/"
+        f"v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    )
+
+    request_body = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": text}
+                ]
+            }
+        ]
+    }
+
+    try:
+        headers = {
+            "User-Agent": "PostmanRuntime/7.36.3",
+            "Accept": "*/*",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "application/json",
+        }
+
+        response = requests.post(url, json=request_body, headers=headers, timeout=30)
+        response_text = response.text
+
+        try:
+            gemini_response = json.loads(response_text)
+        except json.JSONDecodeError:
+            print("Invalid JSON response")
+            return None
+
+        if response.status_code < 200 or response.status_code >= 300:
+            error_msg = (
+                gemini_response.get("error", {}).get("message")
+            )
+            print(f"{response.reason}: {error_msg}")
+            return None
+
+        text_from_gemini = (
+            gemini_response.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text")
+        )
+
+        if text_from_gemini is None:
+            time.sleep(5)
+        else:
+            time.sleep(3)
+
+        return text_from_gemini
+
+    except Exception as ex:
+        print(f"Error calling Gemini API: {ex}")
+        return None

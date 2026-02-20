@@ -11,7 +11,8 @@ import requests
 
 from .collins_dict import fetch_pronunciation
 from .helper_methods import READ_POLISH, TYPE_ENGLISH, DOUBLE, create_note, create_note_from_existing, \
-    move_queue_to_top, delete_notes, has_card_type, add_note_and_move_queue_up, read_json_file, write_json_file
+    move_queue_to_top, delete_notes, has_card_type, add_note_and_move_queue_up, read_json_file, write_json_file, \
+    call_gemini_api_async
 
 #Fields
 FOREIGN_FIELD = "Foreign/Content"
@@ -26,7 +27,7 @@ IPA_FIELD = "IPA"
 class ProgressDialog(QDialog):
     def __init__(self, maximum, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Adding pronunciation...")
+        self.setWindowTitle("Adding...")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.canceled = False
         layout = QVBoxLayout(self)
@@ -244,6 +245,96 @@ def add_pronunciation(browser: Browser):
     browser.model.reset()
     showInfo(f"Added pronunciation")
 
+def generate_sentences(browser: Browser):
+    selected = browser.selectedNotes()
+    if not selected:
+        showInfo("Please select at least one note.")
+        return
+    error = ""
+
+    # Open progress and cancel window
+    progress_dialog = ProgressDialog(len(selected), mw)
+    progress_dialog.show()
+    QApplication.processEvents()
+
+    for idx, note_id in enumerate(selected):
+        # Cancel
+        if progress_dialog.canceled:
+            break
+
+        note = mw.col.get_note(note_id)
+        deck_id = 1744574089128
+
+        note_field = note[FOREIGN_FIELD]
+        note_field = re.sub(r'^to\s', '', note_field)
+        note_field = re.sub(r'\[\d+\]', '', note_field)
+        note_field = re.sub(r'\'s\b', '', note_field)
+        note_field = note_field.replace("&nbsp;", " ")
+        words = re.split(r'[, ]+', note_field.strip())
+        for word in words:
+            if not word.strip():
+                continue
+
+            #Call Gemini
+            ask_gemini = (
+                "Działaj jako precyzyjny generator danych CSV dla osób uczących się języka.\n\n"
+                "ZADANIE:\n"
+                "- Na podstawie podanego słowa i jego znaczeń utwórz po jednym naturalnym zdaniu po angielsku (poziom B2-C1) dla każdego znaczenia i przetłumacz je na polski.\n"
+                "- Używaj naturalnego, współczesnego języka (np. praca, życie codzienne).\n"
+                "- Jeśli słowo ma specyficzne znaczenie techniczne/IT, uwzględnij je, ale nie wymuszaj kontekstu programistycznego w każdym zdaniu.\n"
+                "- Zdania mają jasno ilustrować dane znaczenie.\n\n"
+
+                "PRZYKŁAD POPRAWNEGO FORMATU:\n"
+                "I finally figured out how this device works.|W końcu zrozumiałem, jak działa to urządzenie.\n\n"
+
+                "PRZYKŁAD NIEPOPRAWNY (NIE RÓB TAK):\n"
+                "I finally figured out how this device works.\n"
+                "W końcu zrozumiałem, jak działa to urządzenie.\n\n"
+
+                "ZASADY FORMATOWANIA (BEZWZGLĘDNE):\n"
+                "- Zwróć WYŁĄCZNIE wynik w formacie CSV: Angielskie zdanie|Polskie zdanie\n"
+                "- NIE dodawaj słowa kluczowego ani definicji na początku.\n"
+                "- NIE dodawaj żadnych wstępów, komentarzy, numeracji ani pustych linii.\n"
+                "- Używaj wyłącznie separatora | i nie używaj cudzysłowów, chyba że są częścią zdania.\n"
+                "- Każde znaczenie to dokładnie jedna linia w formacie CSV.\n\n"
+
+                "Oto słówko:\n"
+                f"Angielski: {word}\n"
+                f"Polski: {note[POLISH_FIELD]}"
+            )
+            gemini_response = call_gemini_api_async(ask_gemini)
+            #gemini_response = "I finally figured out how this device works.|W końcu zrozumiałem, jak działa to urządzenie.\n\n"
+            if gemini_response is None:
+                error += f"{note_field}: gemini returned none;"
+                continue;
+            splitted_sentences = [line for line in gemini_response.split("\n") if line.strip()]
+            if len(splitted_sentences) == 0:
+                error +=  f"{note_field}: gemini returned wrong format (\\n) "
+                continue
+            for sentence_line in splitted_sentences:
+                parts = sentence_line.split("|")
+                if len(parts) != 2:
+                    error +=  f"{note_field}: gemini returned wrong format (|) "
+                    continue
+                # Create polish combined note
+                new_polish_note = create_note(TYPE_ENGLISH)
+                new_polish_note[FOREIGN_FIELD] = parts[0]
+                new_polish_note[POLISH_FIELD] = parts[1]
+                add_note_and_move_queue_up(new_polish_note, deck_id)
+
+
+        note.flush()
+        # Go to next word in queue
+        progress_dialog.progress.setValue(idx + 1)
+        QApplication.processEvents()
+
+    progress_dialog.close()
+    browser.model.reset()
+    if error:
+        showInfo(f"Could not generate sentences: {error}")
+    else:
+        showInfo("Sentences generated")
+
 def add_custom_menu(browser: Browser):
     # Action 1
     action_add = QAction("Add synonymous", browser)
@@ -256,11 +347,15 @@ def add_custom_menu(browser: Browser):
     action_pron = QAction("Add pronunciation", browser)
     action_pron.triggered.connect(lambda: add_pronunciation(browser))
 
+    action_gen = QAction("Generate sentences", browser)
+    action_gen.triggered.connect(lambda: generate_sentences(browser))
+
     # Create menu and add both actions
     custom_menu = QMenu("MINE", browser)
     custom_menu.addAction(action_add)
     custom_menu.addAction(action_split)
     custom_menu.addAction(action_pron)
+    custom_menu.addAction(action_gen)
 
     # Add the new custom menu to the browser's menu bar
     browser.form.menubar.addMenu(custom_menu)
