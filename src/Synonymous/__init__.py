@@ -159,7 +159,8 @@ def add_pronunciation(browser: Browser, is_english = True):
         showInfo("Please select at least one note.")
         return
 
-    filepath, pron_dict = read_json_file("pron_and_ipa_list")
+    json = "pron_and_ipa_list" if is_english else "pron_and_ipa_list_it"
+    filepath, pron_dict = read_json_file(json)
 
     #Open progress and cancel window
     progress_dialog = ProgressDialog(len(selected), mw)
