@@ -229,7 +229,6 @@ def add_pronunciation(browser: Browser, is_english = True):
                         f.write(response.content)
             else:
                 audio_list.append("[sound:error.mp3]")
-                pron_dict[word]['sound'] = "[sound:error.mp3]"
 
         # Add IPA and audio to the note
         if len(ipa_list) > 0:
