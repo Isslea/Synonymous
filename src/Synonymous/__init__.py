@@ -245,7 +245,7 @@ def add_pronunciation(browser: Browser):
     browser.model.reset()
     showInfo(f"Added pronunciation")
 
-def generate_sentences(browser: Browser):
+def generate_sentences(browser: Browser, is_english: bool = True):
     selected = browser.selectedNotes()
     if not selected:
         showInfo("Please select at least one note.")
@@ -263,45 +263,55 @@ def generate_sentences(browser: Browser):
             break
 
         note = mw.col.get_note(note_id)
-        deck_id = 1744574089128
+        #deck_id = note.cards()[0].did
+        deck_id = 1744574089128 if is_english else 1771701397936
 
         note_field = note[FOREIGN_FIELD]
         note_field = re.sub(r'^to\s', '', note_field)
         note_field = re.sub(r'\[\d+\]', '', note_field)
         note_field = re.sub(r'\'s\b', '', note_field)
         note_field = note_field.replace("&nbsp;", " ")
-        words = re.split(r'[, ]+', note_field.strip())
+        words = re.split(r'\s*,\s*', note_field.strip()) or note_field.split(",")
         for word in words:
             if not word.strip():
                 continue
 
             #Call Gemini
-            ask_gemini = (
+            prompt_lines = [
                 "Działaj jako precyzyjny generator danych CSV dla osób uczących się języka.\n\n"
                 "ZADANIE:\n"
-                "- Na podstawie podanego słowa i jego znaczeń utwórz po jednym naturalnym zdaniu po angielsku (poziom B2-C1) dla każdego znaczenia i przetłumacz je na polski.\n"
-                "- Używaj naturalnego, współczesnego języka (np. praca, życie codzienne).\n"
-                "- Jeśli słowo ma specyficzne znaczenie techniczne/IT, uwzględnij je, ale nie wymuszaj kontekstu programistycznego w każdym zdaniu.\n"
-                "- Zdania mają jasno ilustrować dane znaczenie.\n\n"
+                f"- Na podstawie podanego słowa i jego znaczeń utwórz po jednym naturalnym zdaniu po "
+                f"{'angielsku' if is_english else 'włosku'} (poziom {'B2-C1' if is_english else 'A1-A2'}) "
+                "dla każdego znaczenia i przetłumacz je na polski.\n"
+                "- Używaj naturalnego, współczesnego języka (np. praca, życie codzienne).\n",
+            ]
 
+            if is_english:
+                prompt_lines.append(
+                    "- Jeśli słowo ma specyficzne znaczenie techniczne/IT, uwzględnij je, ale nie wymuszaj kontekstu programistycznego w każdym zdaniu.\n"
+                )
+
+            prompt_lines.append(
+                "- Zdania mają jasno ilustrować dane znaczenie.\n\n"
                 "PRZYKŁAD POPRAWNEGO FORMATU:\n"
-                "I finally figured out how this device works.|W końcu zrozumiałem, jak działa to urządzenie.\n\n"
+                f"{"I finally figured out how this device works" if is_english else "Ho finalmente capito come funziona questo dispositivo"}.|W końcu zrozumiałem, jak działa to urządzenie.\n\n"
 
                 "PRZYKŁAD NIEPOPRAWNY (NIE RÓB TAK):\n"
-                "I finally figured out how this device works.\n"
+                f"{"I finally figured out how this device works." if is_english else "Ho finalmente capito come funziona questo dispositivo."}\n" 
                 "W końcu zrozumiałem, jak działa to urządzenie.\n\n"
 
                 "ZASADY FORMATOWANIA (BEZWZGLĘDNE):\n"
-                "- Zwróć WYŁĄCZNIE wynik w formacie CSV: Angielskie zdanie|Polskie zdanie\n"
+                f"- Zwróć WYŁĄCZNIE wynik w formacie CSV: {"Angielskie" if is_english else "Włoskie"} zdanie|Polskie zdanie\n"
                 "- NIE dodawaj słowa kluczowego ani definicji na początku.\n"
                 "- NIE dodawaj żadnych wstępów, komentarzy, numeracji ani pustych linii.\n"
                 "- Używaj wyłącznie separatora | i nie używaj cudzysłowów, chyba że są częścią zdania.\n"
                 "- Każde znaczenie to dokładnie jedna linia w formacie CSV.\n\n"
 
                 "Oto słówko:\n"
-                f"Angielski: {word}\n"
+                f"{"Angielski" if is_english else "Włoski"}: {word}\n"
                 f"Polski: {note[POLISH_FIELD]}"
             )
+            ask_gemini = "".join(prompt_lines)
             gemini_response = call_gemini_api_async(ask_gemini)
             #gemini_response = "I finally figured out how this device works.|W końcu zrozumiałem, jak działa to urządzenie.\n\n"
             if gemini_response is None:
@@ -316,7 +326,7 @@ def generate_sentences(browser: Browser):
                 if len(parts) != 2:
                     error +=  f"{note_field}: gemini returned wrong format (|) "
                     continue
-                # Create polish combined note
+                # Create note
                 new_polish_note = create_note(TYPE_ENGLISH)
                 new_polish_note[FOREIGN_FIELD] = parts[0]
                 new_polish_note[POLISH_FIELD] = parts[1]
@@ -347,15 +357,19 @@ def add_custom_menu(browser: Browser):
     action_pron = QAction("Add pronunciation", browser)
     action_pron.triggered.connect(lambda: add_pronunciation(browser))
 
-    action_gen = QAction("Generate sentences", browser)
-    action_gen.triggered.connect(lambda: generate_sentences(browser))
+    action_gen_ENG = QAction("Generate sentences ENG", browser)
+    action_gen_ENG.triggered.connect(lambda: generate_sentences(browser))
+
+    action_gen_IT = QAction("Generate sentences IT", browser)
+    action_gen_IT.triggered.connect(lambda: generate_sentences(browser, False))
 
     # Create menu and add both actions
     custom_menu = QMenu("MINE", browser)
     custom_menu.addAction(action_add)
     custom_menu.addAction(action_split)
     custom_menu.addAction(action_pron)
-    custom_menu.addAction(action_gen)
+    custom_menu.addAction(action_gen_ENG)
+    custom_menu.addAction(action_gen_IT)
 
     # Add the new custom menu to the browser's menu bar
     browser.form.menubar.addMenu(custom_menu)
