@@ -153,7 +153,7 @@ def split_polish_synonymous(browser: Browser):
     browser.model.reset()
     showInfo(f"Splitted {', '.join(polish_words)}")
 
-def add_pronunciation(browser: Browser):
+def add_pronunciation(browser: Browser, is_english = True):
     selected = browser.selectedNotes()
     if not selected:
         showInfo("Please select at least one note.")
@@ -196,7 +196,7 @@ def add_pronunciation(browser: Browser):
                 pron_dict[word] = {}
 
             #Fetch pronunciation and IPA
-            ipa, audio_url = fetch_pronunciation(word)
+            ipa, audio_url = fetch_pronunciation(word, is_english)
 
             if (not ipa or not audio_url) and "-" in word:
                words.extend(word.split("-"))
@@ -354,8 +354,11 @@ def add_custom_menu(browser: Browser):
     action_split = QAction("Split polish synonymous", browser)
     action_split.triggered.connect(lambda: split_polish_synonymous(browser))
 
-    action_pron = QAction("Add pronunciation", browser)
-    action_pron.triggered.connect(lambda: add_pronunciation(browser))
+    action_pron_ENG = QAction("Add pronunciation ENG", browser)
+    action_pron_ENG.triggered.connect(lambda: add_pronunciation(browser))
+
+    action_pron_IT = QAction("Add pronunciation IT", browser)
+    action_pron_IT.triggered.connect(lambda: add_pronunciation(browser, False))
 
     action_gen_ENG = QAction("Generate sentences ENG", browser)
     action_gen_ENG.triggered.connect(lambda: generate_sentences(browser))
@@ -367,7 +370,8 @@ def add_custom_menu(browser: Browser):
     custom_menu = QMenu("MINE", browser)
     custom_menu.addAction(action_add)
     custom_menu.addAction(action_split)
-    custom_menu.addAction(action_pron)
+    custom_menu.addAction(action_pron_ENG)
+    custom_menu.addAction(action_pron_IT)
     custom_menu.addAction(action_gen_ENG)
     custom_menu.addAction(action_gen_IT)
 

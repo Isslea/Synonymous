@@ -37,11 +37,44 @@ def fetch_pron(word: str, url:str, container:str, title:str):
         browser.close()
         return ipa, sound_url
 
+def fetch_pron_it(word: str, container: str):
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context()
+            page = context.new_page()
+            page.goto(f"https://www.collinsdictionary.com/dictionary/italian-english/{word}")
+            page.wait_for_selector(f"body {container}", timeout=1000)
+        except Exception:
+            return None, None
+        regions = page.query_selector_all(f"body {container}")
+        ipa = None
+        sound_url = None
+
+        if len(regions) > 0:
+            for region in regions:
+
+                # Find IPA
+                pron = region.query_selector("span.pron")
+                if pron:
+                    ipa = pron.inner_text().strip()
+
+                # Find sound source
+                sound = region.query_selector('a[class*="sound"]')
+                if sound:
+                    sound_url = sound.get_attribute("data-src-mp3")
+
+        browser.close()
+        return ipa, sound_url
+
 def fetch_pron_in_pron_tab(word: str):
     return fetch_pron(word, "english-pronunciations", "span.region", ".lead")
 
 def fetch_pron_in_def_tab(word: str):
     return fetch_pron(word, "english", ".dictlink", ".dictname")
+
+def fetch_pron_in_it(word: str):
+    return fetch_pron_it(word,  "div.mini_h2")
 
 def fetch_pron_camb(word: str):
     with sync_playwright() as p:
@@ -78,25 +111,28 @@ def fetch_pron_camb(word: str):
         return ipa, sound_url
 
 if __name__ == "__main__":
-    word = sys.argv[1]
+    phrase = sys.argv[1]
+    is_english = sys.argv[2].lower() in ("1", "true", "yes") if len(sys.argv) > 2 else True
+    if is_english:
+        #Fetch from collins pronunciation tab
+        ipa, sound = fetch_pron_camb(phrase)
 
-    #Fetch from collins pronunciation tab
-    ipa, sound = fetch_pron_camb(word)
-
-    # If not found, try fetching from collins definition tab
-    if not ipa or not sound:
-        temp_ipa, temp_sound = fetch_pron_in_pron_tab(word)
-        if temp_ipa:
-            ipa = temp_ipa
-        if temp_sound:
-            sound = temp_sound
-        # If still not found, try fetching from Cambridge
-        if not temp_ipa or not temp_sound:
-            temp_ipa, temp_sound = fetch_pron_in_def_tab(word)
+        # If not found, try fetching from collins definition tab
+        if not ipa or not sound:
+            temp_ipa, temp_sound = fetch_pron_in_pron_tab(phrase)
             if temp_ipa:
                 ipa = temp_ipa
             if temp_sound:
                 sound = temp_sound
+            # If still not found, try fetching from Cambridge
+            if not temp_ipa or not temp_sound:
+                temp_ipa, temp_sound = fetch_pron_in_def_tab(phrase)
+                if temp_ipa:
+                    ipa = temp_ipa
+                if temp_sound:
+                    sound = temp_sound
+    else:
+        ipa, sound = fetch_pron_in_it(phrase)
 
     print(json.dumps({
         "ipa": ipa,

@@ -3,7 +3,7 @@ import certifi
 import subprocess
 import json
 
-def fetch_pronunciation(word: str):
+def fetch_pronunciation(word: str, is_english: bool):
     current_dir = os.path.dirname(os.path.abspath(__file__))
     collins_path = os.path.join(current_dir, 'anki_playwright', 'fetch_collins.py')
 
@@ -11,7 +11,8 @@ def fetch_pronunciation(word: str):
     result = subprocess.run([
         "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
         script_path,
-        word
+        word,
+        "1" if is_english else "0",
     ], capture_output=True, text=True)
     try:
         data = json.loads(result.stdout)
