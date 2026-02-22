@@ -228,7 +228,8 @@ def add_pronunciation(browser: Browser, is_english = True):
                     with open(file_path, "wb") as f:
                         f.write(response.content)
             else:
-                audio_list.append("[sound:error.mp3]")
+                pron_dict[word]['sound'] = ""
+                audio_list.append("")
 
         # Add IPA and audio to the note
         if len(ipa_list) > 0:
