@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local pronunciation cache
+pron_list.json
+
+# IDE (machine-specific)
+.idea/Synonymous.iml
+.idea/modules.xml
+.idea/misc.xml
+.idea/inspectionProfiles/
