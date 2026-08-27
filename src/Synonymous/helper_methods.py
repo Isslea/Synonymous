@@ -4,6 +4,11 @@ import time
 
 import requests
 from aqt import mw
+from aqt.utils import showInfo
+
+#Settings
+SETTINGS_FILE = "synonymous_settings"
+GEMINI_KEY_KEY = "gemini_api_key"
 
 #Card types
 DOUBLE = "1. Podwójny (wpisywanie odpowiedzi)"
@@ -83,7 +88,11 @@ def write_json_file(filepath: str, data: dict):
 
 
 def call_gemini_api_async(text: str) -> str | None:
-    api_key = "AIzaSyDpQ5fpf1S6G9hJ8wy7CPJrqPyOb8sOPfc"
+    _, settings = read_json_file(SETTINGS_FILE)
+    api_key = settings.get(GEMINI_KEY_KEY)
+    if not api_key:
+        showInfo("No Gemini API key set in settings")
+        return None
     url = (
         f"https://generativelanguage.googleapis.com/"
         f"v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"

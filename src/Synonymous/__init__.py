@@ -2,7 +2,7 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction, QMenu
 from aqt.utils import showInfo, getText
 from aqt.browser import Browser
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QProgressBar, QPushButton
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QProgressBar, QPushButton, QComboBox, QLabel, QLineEdit, QPlainTextEdit
 from PyQt6.QtCore import Qt
 from aqt.qt import QApplication
 import re
@@ -11,8 +11,8 @@ import requests
 
 from .collins_dict import fetch_pronunciation
 from .helper_methods import READ_POLISH, TYPE_ENGLISH, DOUBLE, create_note, create_note_from_existing, \
-    move_queue_to_top, delete_notes, has_card_type, add_note_and_move_queue_up, read_json_file, write_json_file, \
-    call_gemini_api_async
+    delete_notes, has_card_type, add_note_and_move_queue_up, read_json_file, write_json_file, \
+    call_gemini_api_async, SETTINGS_FILE, GEMINI_KEY_KEY
 
 #Fields
 FOREIGN_FIELD = "Foreign/Content"
@@ -40,6 +40,163 @@ class ProgressDialog(QDialog):
 
     def cancel(self):
         self.canceled = True
+
+LANGUAGES_KEY = "languages"
+
+DEFAULT_ENGLISH = {"name": "angielski", "level": "B2-C1", "deck": None}
+
+#The only user-editable part of the sentences prompt
+DEFAULT_STYLE_PROMPT = (
+    "- Używaj naturalnego, współczesnego języka (np. praca, życie codzienne).\n"
+    "- Zdania mają jasno ilustrować dane znaczenie."
+)
+
+SENTENCES_PROMPT_TEMPLATE = (
+    "Działaj jako precyzyjny generator danych CSV dla osób uczących się języka.\n\n"
+    "ZADANIE:\n"
+    "- Na podstawie podanego słowa i jego znaczeń utwórz po jednym naturalnym zdaniu w języku: {language} "
+    "(poziom {level}) dla każdego znaczenia i przetłumacz je na polski.\n"
+    "{style}\n\n"
+    "PRZYKŁAD POPRAWNEGO FORMATU:\n"
+    "I finally figured out how this device works.|W końcu zrozumiałem, jak działa to urządzenie.\n\n"
+    "PRZYKŁAD NIEPOPRAWNY (NIE RÓB TAK):\n"
+    "I finally figured out how this device works.\n"
+    "W końcu zrozumiałem, jak działa to urządzenie.\n\n"
+    "ZASADY FORMATOWANIA (BEZWZGLĘDNE):\n"
+    "- Zwróć WYŁĄCZNIE wynik w formacie CSV: Zdanie w języku {language}|Polskie zdanie\n"
+    "- NIE dodawaj słowa kluczowego ani definicji na początku.\n"
+    "- NIE dodawaj żadnych wstępów, komentarzy, numeracji ani pustych linii.\n"
+    "- Używaj wyłącznie separatora | i nie używaj cudzysłowów, chyba że są częścią zdania.\n"
+    "- Każde znaczenie to dokładnie jedna linia w formacie CSV.\n\n"
+    "Oto słówko:\n"
+    "Słówko ({language}): {foreign}\n"
+    "Polski: {polish}"
+)
+
+def get_languages(settings):
+    languages = settings.get(LANGUAGES_KEY) or [dict(DEFAULT_ENGLISH)]
+    for lang in languages:
+        if not lang.get("style"):
+            lang["style"] = DEFAULT_STYLE_PROMPT
+    return languages
+
+class SettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Synonymous settings")
+        self.filepath, self.settings = read_json_file(SETTINGS_FILE)
+        self.decks = sorted(mw.col.decks.all_names_and_ids(), key=lambda deck: deck.name)
+        self.lang_rows = []
+
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("Gemini API key:", self))
+        key_row = QHBoxLayout()
+        self.key_input = QLineEdit(self)
+        self.key_input.setText(self.settings.get(GEMINI_KEY_KEY, ""))
+        self.key_input.setPlaceholderText("Paste your Gemini API key")
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.key_input.setEnabled(False)
+        key_row.addWidget(self.key_input)
+        self.key_edit_btn = QPushButton("Edit", self)
+        self.key_edit_btn.setFixedWidth(50)
+        self.key_edit_btn.clicked.connect(self.toggle_key_edit)
+        key_row.addWidget(self.key_edit_btn)
+        layout.addLayout(key_row)
+
+        layout.addWidget(QLabel("Languages (generate sentences):", self))
+        self.langs_layout = QVBoxLayout()
+        layout.addLayout(self.langs_layout)
+        for i, lang in enumerate(get_languages(self.settings)):
+            self.add_language_row(lang, removable=(i > 0))
+
+        add_btn = QPushButton("+", self)
+        add_btn.clicked.connect(lambda: self.add_language_row({"name": "", "level": "", "deck": None}, removable=True))
+        layout.addWidget(add_btn)
+
+        save_btn = QPushButton("Save", self)
+        save_btn.clicked.connect(self.save)
+        layout.addWidget(save_btn)
+
+    def toggle_key_edit(self):
+        editing = not self.key_input.isEnabled()
+        self.key_input.setEnabled(editing)
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Normal if editing else QLineEdit.EchoMode.Password)
+        self.key_edit_btn.setText("Hide" if editing else "Edit")
+        if editing:
+            self.key_input.setFocus()
+
+    def add_language_row(self, lang, removable):
+        row = QHBoxLayout()
+        name_input = QLineEdit(self)
+        name_input.setText(lang.get("name", ""))
+        name_input.setPlaceholderText("angielski")
+        level_input = QLineEdit(self)
+        level_input.setText(lang.get("level", ""))
+        level_input.setPlaceholderText("A2")
+
+        deck_combo = QComboBox(self)
+        for deck in self.decks:
+            deck_combo.addItem(deck.name, deck.id)
+        if lang.get("deck") is not None:
+            index = deck_combo.findData(lang["deck"])
+            if index >= 0:
+                deck_combo.setCurrentIndex(index)
+
+        row.addWidget(QLabel("language:", self))
+        row.addWidget(name_input)
+        row.addWidget(QLabel("level:", self))
+        row.addWidget(level_input)
+        row.addWidget(QLabel("deck:", self))
+        row.addWidget(deck_combo)
+
+        style_input = QPlainTextEdit(self)
+        style_input.setPlainText(lang.get("style") or DEFAULT_STYLE_PROMPT)
+        style_input.setFixedHeight(60)
+
+        entry = {"name": name_input, "level": level_input, "deck": deck_combo, "style": style_input, "row": row}
+        if removable:
+            remove_btn = QPushButton("x", self)
+            remove_btn.setFixedWidth(30)
+            remove_btn.clicked.connect(lambda _, e=entry: self.remove_language_row(e))
+            row.addWidget(remove_btn)
+        else:
+            #Default english cannot be renamed or removed
+            name_input.setEnabled(False)
+
+        self.lang_rows.append(entry)
+        self.langs_layout.addLayout(row)
+        self.langs_layout.addWidget(style_input)
+
+    def remove_language_row(self, entry):
+        self.lang_rows.remove(entry)
+        while entry["row"].count():
+            item = entry["row"].takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.langs_layout.removeItem(entry["row"])
+        entry["style"].deleteLater()
+
+    def save(self):
+        languages = []
+        for entry in self.lang_rows:
+            name = entry["name"].text().strip()
+            if not name:
+                continue
+            languages.append({
+                "name": name,
+                "level": entry["level"].text().strip(),
+                "deck": entry["deck"].currentData(),
+                "style": entry["style"].toPlainText().strip() or DEFAULT_STYLE_PROMPT,
+            })
+        self.settings[GEMINI_KEY_KEY] = self.key_input.text().strip()
+        self.settings[LANGUAGES_KEY] = languages
+        write_json_file(self.filepath, self.settings)
+        self.accept()
+
+def open_settings(browser: Browser):
+    if SettingsDialog(browser).exec():
+        build_mine_menu(browser)
 
 def add_english_synonym(browser: Browser):
     selected = browser.selectedNotes()
@@ -246,12 +403,19 @@ def add_pronunciation(browser: Browser, is_english = True):
     browser.model.reset()
     showInfo(f"Added pronunciation")
 
-def generate_sentences(browser: Browser, is_english: bool = True):
+def generate_sentences(browser: Browser, lang: dict):
     selected = browser.selectedNotes()
     if not selected:
         showInfo("Please select at least one note.")
         return
+    _, settings = read_json_file(SETTINGS_FILE)
+    if not settings.get(GEMINI_KEY_KEY):
+        showInfo("No Gemini API key set in settings")
+        return
+
     error = ""
+    style = lang.get("style") or DEFAULT_STYLE_PROMPT
+    saved_deck = lang.get("deck")
 
     # Open progress and cancel window
     progress_dialog = ProgressDialog(len(selected), mw)
@@ -264,8 +428,7 @@ def generate_sentences(browser: Browser, is_english: bool = True):
             break
 
         note = mw.col.get_note(note_id)
-        #deck_id = note.cards()[0].did
-        deck_id = 1744574089128 if is_english else 1771701397936
+        deck_id = saved_deck if saved_deck else note.cards()[0].did
 
         note_field = note[FOREIGN_FIELD]
         note_field = re.sub(r'^to\s', '', note_field)
@@ -278,46 +441,20 @@ def generate_sentences(browser: Browser, is_english: bool = True):
                 continue
 
             #Call Gemini
-            prompt_lines = [
-                "Działaj jako precyzyjny generator danych CSV dla osób uczących się języka.\n\n"
-                "ZADANIE:\n"
-                f"- Na podstawie podanego słowa i jego znaczeń utwórz po jednym naturalnym zdaniu po "
-                f"{'angielsku' if is_english else 'włosku'} (poziom {'B2-C1' if is_english else 'A1-A2'}) "
-                "dla każdego znaczenia i przetłumacz je na polski.\n"
-                "- Używaj naturalnego, współczesnego języka (np. praca, życie codzienne).\n",
-            ]
-
-            if is_english:
-                prompt_lines.append(
-                    "- Jeśli słowo ma specyficzne znaczenie techniczne/IT, uwzględnij je, ale nie wymuszaj kontekstu programistycznego w każdym zdaniu.\n"
-                )
-
-            prompt_lines.append(
-                "- Zdania mają jasno ilustrować dane znaczenie.\n\n"
-                "PRZYKŁAD POPRAWNEGO FORMATU:\n"
-                f"{"I finally figured out how this device works" if is_english else "Ho finalmente capito come funziona questo dispositivo"}.|W końcu zrozumiałem, jak działa to urządzenie.\n\n"
-
-                "PRZYKŁAD NIEPOPRAWNY (NIE RÓB TAK):\n"
-                f"{"I finally figured out how this device works." if is_english else "Ho finalmente capito come funziona questo dispositivo."}\n" 
-                "W końcu zrozumiałem, jak działa to urządzenie.\n\n"
-
-                "ZASADY FORMATOWANIA (BEZWZGLĘDNE):\n"
-                f"- Zwróć WYŁĄCZNIE wynik w formacie CSV: {"Angielskie" if is_english else "Włoskie"} zdanie|Polskie zdanie\n"
-                "- NIE dodawaj słowa kluczowego ani definicji na początku.\n"
-                "- NIE dodawaj żadnych wstępów, komentarzy, numeracji ani pustych linii.\n"
-                "- Używaj wyłącznie separatora | i nie używaj cudzysłowów, chyba że są częścią zdania.\n"
-                "- Każde znaczenie to dokładnie jedna linia w formacie CSV.\n\n"
-
-                "Oto słówko:\n"
-                f"{"Angielski" if is_english else "Włoski"}: {word}\n"
-                f"Polski: {note[POLISH_FIELD]}"
-            )
-            ask_gemini = "".join(prompt_lines)
+            prompt_values = {
+                "language": lang.get("name", ""),
+                "level": lang.get("level", ""),
+                "style": style,
+                "foreign": word,
+                "polish": note[POLISH_FIELD],
+            }
+            ask_gemini = SENTENCES_PROMPT_TEMPLATE
+            for key, value in prompt_values.items():
+                ask_gemini = ask_gemini.replace("{" + key + "}", str(value))
             gemini_response = call_gemini_api_async(ask_gemini)
-            #gemini_response = "I finally figured out how this device works.|W końcu zrozumiałem, jak działa to urządzenie.\n\n"
             if gemini_response is None:
                 error += f"{note_field}: gemini returned none;"
-                continue;
+                continue
             splitted_sentences = [line for line in gemini_response.split("\n") if line.strip()]
             if len(splitted_sentences) == 0:
                 error +=  f"{note_field}: gemini returned wrong format (\\n) "
@@ -346,38 +483,33 @@ def generate_sentences(browser: Browser, is_english: bool = True):
     else:
         showInfo("Sentences generated")
 
-def add_custom_menu(browser: Browser):
-    # Action 1
+def build_mine_menu(browser: Browser):
+    custom_menu = getattr(browser, "_synonymous_menu", None)
+    if custom_menu is None:
+        custom_menu = QMenu("MINE", browser)
+        browser._synonymous_menu = custom_menu
+        browser.form.menubar.addMenu(custom_menu)
+    custom_menu.clear()
+
     action_add = QAction("Add synonymous", browser)
     action_add.triggered.connect(lambda: add_english_synonym(browser))
+    custom_menu.addAction(action_add)
 
-    # Action 2
     action_split = QAction("Split polish synonymous", browser)
     action_split.triggered.connect(lambda: split_polish_synonymous(browser))
-
-    action_pron_ENG = QAction("Add pronunciation ENG", browser)
-    action_pron_ENG.triggered.connect(lambda: add_pronunciation(browser))
-
-    action_pron_IT = QAction("Add pronunciation IT", browser)
-    action_pron_IT.triggered.connect(lambda: add_pronunciation(browser, False))
-
-    action_gen_ENG = QAction("Generate sentences ENG", browser)
-    action_gen_ENG.triggered.connect(lambda: generate_sentences(browser))
-
-    action_gen_IT = QAction("Generate sentences IT", browser)
-    action_gen_IT.triggered.connect(lambda: generate_sentences(browser, False))
-
-    # Create menu and add both actions
-    custom_menu = QMenu("MINE", browser)
-    custom_menu.addAction(action_add)
     custom_menu.addAction(action_split)
-    custom_menu.addAction(action_pron_ENG)
-    custom_menu.addAction(action_pron_IT)
-    custom_menu.addAction(action_gen_ENG)
-    custom_menu.addAction(action_gen_IT)
 
-    # Add the new custom menu to the browser's menu bar
-    browser.form.menubar.addMenu(custom_menu)
+    _, settings = read_json_file(SETTINGS_FILE)
+    for lang in get_languages(settings):
+        action_gen = QAction(f"Generate sentences {lang['name']}", browser)
+        action_gen.triggered.connect(lambda _=False, l=lang: generate_sentences(browser, l))
+        custom_menu.addAction(action_gen)
+
+    action_settings = QAction("Settings", browser)
+    # Prevent macOS from moving "Settings" into the app menu as Preferences
+    action_settings.setMenuRole(QAction.MenuRole.NoRole)
+    action_settings.triggered.connect(lambda: open_settings(browser))
+    custom_menu.addAction(action_settings)
 
 # Hook the function to the browser when it's initialized
-gui_hooks.browser_menus_did_init.append(add_custom_menu)
+gui_hooks.browser_menus_did_init.append(build_mine_menu)
